@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compose to Shell Converter</title>
+    <!-- YAML Parser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Prism.js Syntax Highlighting (Tomorrow Night Theme) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/Clou/prism/1.29.0/components/prism-yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+    
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+        .code-area {
+            font-family: 'Fira Code', 'Courier New', Courier, monospace;
+        }
+        /* Override Prism background to match UI */
+        pre[class*="language-"] {
+            background: #020617 !important;
+            margin: 0;
+            border: none;
+        }
+        code[class*="language-"] {
+            font-size: 0.875rem !important;
+        }
+        /* Custom scrollbar for better visibility */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-extrabold text-blue-400 mb-2 tracking-tight">Docker Compose → Shell</h1>
+            <p class="text-slate-400">Transform your Compose files into optimized "docker run" bash scripts.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <!-- Input Area -->
+            <div class="flex flex-col">
+                <label class="block text-sm font-semibold mb-2 text-slate-300 uppercase tracking-wider">Source: docker-compose.yml</label>
+                <textarea 
+                    id="yamlInput" 
+                    class="code-area w-full h-[500px] p-4 bg-slate-800 border border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none text-sm leading-relaxed shadow-2xl"
+                    placeholder="version: '3.8'&#10;services:&#10;  web:&#10;    image: nginx:latest&#10;    ports:&#10;      - '80:80'"
+                ></textarea>
+            </div>
+
+            <!-- Output Area -->
+            <div class="flex flex-col">
+                <div class="flex justify-between items-center mb-2">
+                    <label class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Output: run-services.sh</label>
+                    <button 
+                        id="copyBtn"
+                        class="px-4 py-1.5 text-xs font-bold bg-slate-700 hover:bg-slate-600 rounded-md transition-all flex items-center gap-2"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                        </svg>
+                        Copy Script
+                    </button>
+                </div>
+                <div class="relative bg-slate-900 border border-slate-700 rounded-lg overflow-hidden group shadow-2xl h-[500px]">
+                    <pre class="h-full overflow-auto"><code id="shellOutput" class="language-bash"># Conversion result will appear here...</code></pre>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-8 flex justify-center flex-col items-center gap-4">
+            <button 
+                id="convertBtn"
+                class="px-10 py-4 bg-blue-500 hover:bg-blue-400 text-white font-black rounded-xl shadow-xl transform transition-all active:scale-95 flex items-center gap-3 text-lg"
+            >
+                Generate Script
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+            </button>
+            <div id="statusMessage" class="hidden px-6 py-2 rounded-full font-medium text-sm animate-pulse text-center"></div>
+        </div>
+    </div>
+
+    <script>
+        const yamlInput = document.getElementById('yamlInput');
+        const shellOutput = document.getElementById('shellOutput');
+        const convertBtn = document.getElementById('convertBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const statusMessage = document.getElementById('statusMessage');
+
+        function convertComposeToShell(yamlText) {
+            try {
+                const doc = jsyaml.load(yamlText);
+                if (!doc || !doc.services) {
+                    throw new Error("Invalid YAML structure. Please ensure a 'services' block exists.");
+                }
+
+                let script = "#!/bin/bash\n\n";
+                script += "# Generated Script: Docker Compose to CLI\n";
+                script += "# Date: " + new Date().toLocaleString() + "\n\n";
+
+                for (const [name, config] of Object.entries(doc.services)) {
+                    script += `echo "------------------------------------------------"\n`;
+                    script += `echo "Deploying container: ${name}"\n`;
+                    script += `echo "------------------------------------------------"\n`;
+                    
+                    let command = `docker run -d \\\n  --name ${name}`;
+
+                    if (config.restart) command += ` \\\n  --restart ${config.restart}`;
+
+                    if (config.networks) {
+                        const nets = Array.isArray(config.networks) ? config.networks : Object.keys(config.networks);
+                        nets.forEach(net => command += ` \\\n  --network ${net}`);
+                    }
+
+                    if (config.environment) {
+                        if (Array.isArray(config.environment)) {
+                            config.environment.forEach(env => command += ` \\\n  -e ${env}`);
+                        } else {
+                            for (const [key, val] of Object.entries(config.environment)) {
+                                command += ` \\\n  -e "${key}=${val}"`;
+                            }
+                        }
+                    }
+
+                    if (config.ports) {
+                        config.ports.forEach(port => command += ` \\\n  -p ${port}`);
+                    }
+
+                    if (config.volumes) {
+                        config.volumes.forEach(vol => {
+                            const volumeString = typeof vol === 'string' ? vol : `${vol.source}:${vol.target}${vol.read_only ? ':ro' : ''}`;
+                            command += ` \\\n  -v ${volumeString}`;
+                        });
+                    }
+
+                    if (config.user) command += ` \\\n  --user ${config.user}`;
+
+                    if (config.image) {
+                        command += ` \\\n  ${config.image}`;
+                    } else {
+                        command += ` \\\n  [MISSING_IMAGE]`;
+                    }
+
+                    if (config.command) {
+                        const cmd = Array.isArray(config.command) ? config.command.join(' ') : config.command;
+                        command += ` ${cmd}`;
+                    }
+
+                    script += command + "\n\n";
+                }
+
+                return script;
+            } catch (e) {
+                throw e;
+            }
+        }
+
+        function showStatus(msg, isError = false) {
+            statusMessage.textContent = msg;
+            statusMessage.className = `px-6 py-2 rounded-full font-medium text-sm ${isError ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`;
+            statusMessage.classList.remove('hidden');
+            setTimeout(() => statusMessage.classList.add('hidden'), 4000);
+        }
+
+        convertBtn.addEventListener('click', () => {
+            const rawYaml = yamlInput.value.trim();
+            if (!rawYaml) {
+                showStatus("Error: Input is empty.", true);
+                return;
+            }
+
+            try {
+                const result = convertComposeToShell(rawYaml);
+                shellOutput.textContent = result;
+                Prism.highlightElement(shellOutput);
+                showStatus("Success: Shell script generated!");
+            } catch (err) {
+                shellOutput.textContent = `# Error during conversion:\n# ${err.message}`;
+                Prism.highlightElement(shellOutput);
+                showStatus("Conversion failed.", true);
+            }
+        });
+
+        copyBtn.addEventListener('click', () => {
+            const text = shellOutput.textContent;
+            if (!text || text.includes("Conversion result will appear here")) return;
+            
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            
+            const originalHTML = copyBtn.innerHTML;
+            copyBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                Copied!
+            `;
+            setTimeout(() => copyBtn.innerHTML = originalHTML, 2000);
+        });
+    </script>
+</body>
+</html>
