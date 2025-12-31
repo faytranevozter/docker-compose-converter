@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Compose to Shell Converter</title>
+    <title>Compose to CLI Converter</title>
     <!-- YAML Parser -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
     <!-- Tailwind CSS -->
@@ -11,7 +11,7 @@
     <!-- Prism.js Syntax Highlighting (Tomorrow Night Theme) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/Clou/prism/1.29.0/components/prism-yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
     
     <style>
@@ -22,7 +22,6 @@
         .code-area {
             font-family: 'Fira Code', 'Courier New', Courier, monospace;
         }
-        /* Override Prism background to match UI */
         pre[class*="language-"] {
             background: #020617 !important;
             margin: 0;
@@ -31,7 +30,6 @@
         code[class*="language-"] {
             font-size: 0.875rem !important;
         }
-        /* Custom scrollbar for better visibility */
         ::-webkit-scrollbar {
             width: 8px;
         }
@@ -50,8 +48,8 @@
 <body class="min-h-screen p-4 md:p-8">
     <div class="max-w-7xl mx-auto">
         <header class="mb-8 text-center">
-            <h1 class="text-4xl font-extrabold text-blue-400 mb-2 tracking-tight">Docker Compose → Shell</h1>
-            <p class="text-slate-400">Transform your Compose files into optimized "docker run" bash scripts.</p>
+            <h1 class="text-4xl font-extrabold text-blue-400 mb-2 tracking-tight">Docker Compose → CLI</h1>
+            <p class="text-slate-400">Convert Compose files into standalone Run commands or Swarm Service creation scripts.</p>
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
@@ -68,7 +66,7 @@
             <!-- Output Area -->
             <div class="flex flex-col">
                 <div class="flex justify-between items-center mb-2">
-                    <label class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Output: run-services.sh</label>
+                    <label class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Output Script</label>
                     <button 
                         id="copyBtn"
                         class="px-4 py-1.5 text-xs font-bold bg-slate-700 hover:bg-slate-600 rounded-md transition-all flex items-center gap-2"
@@ -85,7 +83,25 @@
             </div>
         </div>
 
-        <div class="mt-8 flex justify-center flex-col items-center gap-4">
+        <div class="mt-8 flex justify-center flex-col items-center gap-6">
+            <!-- Mode Selection -->
+            <div class="flex items-center gap-4 bg-slate-800 p-2 rounded-xl border border-slate-700">
+                <button 
+                    id="modeRun" 
+                    class="px-6 py-2 rounded-lg font-bold text-sm transition-all bg-blue-500 text-white shadow-lg"
+                    onclick="setMode('run')"
+                >
+                    docker run
+                </button>
+                <button 
+                    id="modeService" 
+                    class="px-6 py-2 rounded-lg font-bold text-sm transition-all text-slate-400 hover:text-white"
+                    onclick="setMode('service')"
+                >
+                    docker service create
+                </button>
+            </div>
+
             <button 
                 id="convertBtn"
                 class="px-10 py-4 bg-blue-500 hover:bg-blue-400 text-white font-black rounded-xl shadow-xl transform transition-all active:scale-95 flex items-center gap-3 text-lg"
@@ -105,61 +121,104 @@
         const convertBtn = document.getElementById('convertBtn');
         const copyBtn = document.getElementById('copyBtn');
         const statusMessage = document.getElementById('statusMessage');
+        
+        let outputMode = 'run'; // Default mode
+
+        function setMode(mode) {
+            outputMode = mode;
+            const runBtn = document.getElementById('modeRun');
+            const svcBtn = document.getElementById('modeService');
+            
+            if (mode === 'run') {
+                runBtn.className = "px-6 py-2 rounded-lg font-bold text-sm transition-all bg-blue-500 text-white shadow-lg";
+                svcBtn.className = "px-6 py-2 rounded-lg font-bold text-sm transition-all text-slate-400 hover:text-white";
+            } else {
+                svcBtn.className = "px-6 py-2 rounded-lg font-bold text-sm transition-all bg-blue-500 text-white shadow-lg";
+                runBtn.className = "px-6 py-2 rounded-lg font-bold text-sm transition-all text-slate-400 hover:text-white";
+            }
+        }
 
         function convertComposeToShell(yamlText) {
             try {
                 const doc = jsyaml.load(yamlText);
                 if (!doc || !doc.services) {
-                    throw new Error("Invalid YAML structure. Please ensure a 'services' block exists.");
+                    throw new Error("Invalid YAML structure. Ensure a 'services' block exists.");
                 }
 
                 let script = "#!/bin/bash\n\n";
-                script += "# Generated Script: Docker Compose to CLI\n";
+                script += `# Output Mode: ${outputMode === 'run' ? 'Docker Run' : 'Docker Service'}\n`;
                 script += "# Date: " + new Date().toLocaleString() + "\n\n";
 
                 for (const [name, config] of Object.entries(doc.services)) {
                     script += `echo "------------------------------------------------"\n`;
-                    script += `echo "Deploying container: ${name}"\n`;
+                    script += `echo "Processing: ${name}"\n`;
                     script += `echo "------------------------------------------------"\n`;
                     
-                    let command = `docker run -d \\\n  --name ${name}`;
+                    let command = "";
+                    const isSvc = outputMode === 'service';
 
-                    if (config.restart) command += ` \\\n  --restart ${config.restart}`;
+                    if (isSvc) {
+                        command = `docker service create \\\n  --name ${name}`;
+                    } else {
+                        command = `docker run -d \\\n  --name ${name}`;
+                    }
 
+                    // Restart Policy
+                    if (config.restart) {
+                        command += ` \\\n  --restart ${config.restart}`;
+                    }
+
+                    // Networks
                     if (config.networks) {
                         const nets = Array.isArray(config.networks) ? config.networks : Object.keys(config.networks);
                         nets.forEach(net => command += ` \\\n  --network ${net}`);
                     }
 
+                    // Environment Variables
                     if (config.environment) {
+                        const flag = isSvc ? '--env' : '-e';
                         if (Array.isArray(config.environment)) {
-                            config.environment.forEach(env => command += ` \\\n  -e ${env}`);
+                            config.environment.forEach(env => command += ` \\\n  ${flag} ${env}`);
                         } else {
                             for (const [key, val] of Object.entries(config.environment)) {
-                                command += ` \\\n  -e "${key}=${val}"`;
+                                command += ` \\\n  ${flag} "${key}=${val}"`;
                             }
                         }
                     }
 
+                    // Ports
                     if (config.ports) {
-                        config.ports.forEach(port => command += ` \\\n  -p ${port}`);
+                        const flag = isSvc ? '--publish' : '-p';
+                        config.ports.forEach(port => command += ` \\\n  ${flag} ${port}`);
                     }
 
+                    // Volumes
                     if (config.volumes) {
+                        const flag = isSvc ? '--mount' : '-v';
                         config.volumes.forEach(vol => {
-                            const volumeString = typeof vol === 'string' ? vol : `${vol.source}:${vol.target}${vol.read_only ? ':ro' : ''}`;
-                            command += ` \\\n  -v ${volumeString}`;
+                            if (isSvc && typeof vol === 'string') {
+                                // Basic string to mount conversion for services
+                                const parts = vol.split(':');
+                                if (parts.length >= 2) {
+                                    command += ` \\\n  --mount type=bind,source=${parts[0]},target=${parts[1]}`;
+                                }
+                            } else {
+                                const volumeString = typeof vol === 'string' ? vol : `${vol.source}:${vol.target}${vol.read_only ? ':ro' : ''}`;
+                                command += ` \\\n  -v ${volumeString}`;
+                            }
                         });
                     }
 
                     if (config.user) command += ` \\\n  --user ${config.user}`;
 
+                    // Image
                     if (config.image) {
                         command += ` \\\n  ${config.image}`;
                     } else {
                         command += ` \\\n  [MISSING_IMAGE]`;
                     }
 
+                    // Command
                     if (config.command) {
                         const cmd = Array.isArray(config.command) ? config.command.join(' ') : config.command;
                         command += ` ${cmd}`;
@@ -192,7 +251,7 @@
                 const result = convertComposeToShell(rawYaml);
                 shellOutput.textContent = result;
                 Prism.highlightElement(shellOutput);
-                showStatus("Success: Shell script generated!");
+                showStatus(`Success: ${outputMode === 'run' ? 'Docker Run' : 'Service'} script generated!`);
             } catch (err) {
                 shellOutput.textContent = `# Error during conversion:\n# ${err.message}`;
                 Prism.highlightElement(shellOutput);
